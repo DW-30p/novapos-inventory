@@ -1,0 +1,20 @@
+{
+  "name": "colmado-inventory",
+  "version": "1.0.0",
+  "description": "Sistema de Inventario - Colmado Gerardo",
+  "main": "api/products.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Build complete'",
+    "start": "vercel dev"
+  },
+  "keywords": ["inventory", "pos", "colmado"],
+  "author": "Tu Nombre",
+  "license": "MIT",
+  "dependencies": {
+    "@vercel/postgres": "^0.5.1"
+  },
+  "devDependencies": {
+    "vercel": "^32.0.0"
+  }
+}
