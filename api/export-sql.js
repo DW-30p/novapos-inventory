@@ -2,12 +2,26 @@ const { sql } = require('@vercel/postgres');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
+
   try {
+    console.log('Exportando productos...');
+    
     const { rows } = await sql`
       SELECT * FROM inventory_products 
       ORDER BY category_name, name
     `;
+
+    console.log('Productos a exportar:', rows.length);
 
     // Generar SQL compatible con tu estructura de Colmado Gerardo
     let sqlOutput = '-- =====================================================\n';
@@ -54,7 +68,10 @@ module.exports = async (req, res) => {
     return res.status(200).send(sqlOutput);
 
   } catch (error) {
-    console.error('Error generando SQL:', error);
-    return res.status(500).json({ error: error.message });
+    console.error('Error al exportar:', error);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Error al exportar: ' + error.message 
+    });
   }
 };
