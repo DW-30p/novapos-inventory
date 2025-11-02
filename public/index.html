@@ -175,22 +175,39 @@
 
             setLoading(true);
             try {
+              const productData = {
+                name: formData.name.trim(),
+                barcode: formData.barcode?.trim() || null,
+                description: formData.description?.trim() || null,
+                price: parseFloat(formData.price) || 0,
+                cost: parseFloat(formData.cost) || 0,
+                stock: parseInt(formData.stock) || 0,
+                min_stock: parseInt(formData.min_stock) || 0,
+                category_name: formData.category_name?.trim() || null
+              };
+
+              console.log('Enviando producto:', productData);
+
               const response = await fetch(`${API_URL}/products`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  name: formData.name.trim(),
-                  barcode: formData.barcode?.trim() || null,
-                  description: formData.description?.trim() || null,
-                  price: parseFloat(formData.price) || 0,
-                  cost: parseFloat(formData.cost) || 0,
-                  stock: parseInt(formData.stock) || 0,
-                  min_stock: parseInt(formData.min_stock) || 0,
-                  category_name: formData.category_name?.trim() || null
-                })
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                },
+                body: JSON.stringify(productData)
               });
 
+              console.log('Response status:', response.status);
+              console.log('Response headers:', response.headers.get('content-type'));
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error response:', errorText);
+                throw new Error(`Error ${response.status}: ${errorText.substring(0, 100)}`);
+              }
+
               const data = await response.json();
+              console.log('Response data:', data);
               
               if (data.success) {
                 await loadData();
@@ -201,8 +218,8 @@
                 throw new Error(data.error || 'Error al guardar');
               }
             } catch (error) {
-              console.error('Error:', error);
-              showToast('❌ Error al guardar: ' + error.message, 'error');
+              console.error('Error completo:', error);
+              showToast('❌ Error: ' + error.message, 'error');
             } finally {
               setLoading(false);
             }
