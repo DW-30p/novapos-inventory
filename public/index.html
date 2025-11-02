@@ -2,20 +2,45 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="description" content="Sistema de Inventario - Colmado Gerardo">
     <meta name="theme-color" content="#4F46E5">
     <title>Inventario - Colmado Gerardo</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow-x: hidden;
+        }
+        input, textarea, button {
+            font-size: 16px !important;
+        }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .modal-overlay {
+            backdrop-filter: blur(4px);
+        }
     </style>
 </head>
 <body>
     <div id="root">
-        <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
             <div class="text-center">
                 <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto mb-4"></div>
                 <p class="text-gray-600 font-semibold">Cargando sistema...</p>
@@ -30,8 +55,24 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // API BASE URL
         const API_URL = '/api';
+
+        // Componente Toast para notificaciones
+        const Toast = ({ message, type, onClose }) => {
+            useEffect(() => {
+                const timer = setTimeout(onClose, 3000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+
+            return (
+                <div className={`toast ${bgColor} text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-3 max-w-sm`}>
+                    <i data-lucide={type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info'} className="w-6 h-6"></i>
+                    <span className="font-medium">{message}</span>
+                </div>
+            );
+        };
 
         const InventorySystem = () => {
           const [products, setProducts] = useState([]);
@@ -40,6 +81,7 @@
           const [viewMode, setViewMode] = useState('grid');
           const [searchTerm, setSearchTerm] = useState('');
           const [loading, setLoading] = useState(false);
+          const [toast, setToast] = useState(null);
           const [formData, setFormData] = useState({
             name: '', barcode: '', description: '', price: '',
             cost: '', stock: '', min_stock: '', category_name: ''
@@ -50,10 +92,17 @@
 
           useEffect(() => {
             loadData();
-            lucide.createIcons();
+            setTimeout(() => lucide.createIcons(), 100);
           }, []);
 
-          // CARGAR PRODUCTOS DESDE NEON
+          useEffect(() => {
+            lucide.createIcons();
+          }, [products, showForm, showScanner, toast]);
+
+          const showToast = (message, type = 'info') => {
+            setToast({ message, type });
+          };
+
           const loadData = async () => {
             try {
               const response = await fetch(`${API_URL}/products`);
@@ -63,43 +112,64 @@
               }
             } catch (error) {
               console.error('Error loading products:', error);
+              showToast('Error al cargar productos', 'error');
             }
           };
 
           const startCamera = async () => {
             try {
-              const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment' }
-              });
+              const constraints = {
+                video: { 
+                  facingMode: 'environment',
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 }
+                }
+              };
+              
+              const stream = await navigator.mediaDevices.getUserMedia(constraints);
+              
               if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 streamRef.current = stream;
+                setShowScanner(true);
+                showToast('Cámara activada', 'success');
               }
-              setShowScanner(true);
             } catch (error) {
-              alert('Error al acceder a la cámara: ' + error.message);
+              console.error('Error al acceder a la cámara:', error);
+              showToast('No se pudo acceder a la cámara. Verifica los permisos.', 'error');
+              // Si falla, permite ingreso manual directo
+              const barcode = prompt('No se pudo acceder a la cámara.\nIngresa el código de barras manualmente:');
+              if (barcode) {
+                setFormData(prev => ({ ...prev, barcode }));
+              }
             }
           };
 
           const stopCamera = () => {
             if (streamRef.current) {
               streamRef.current.getTracks().forEach(track => track.stop());
+              streamRef.current = null;
             }
             setShowScanner(false);
           };
 
           const captureBarcode = () => {
+            stopCamera();
             const barcode = prompt('Ingresa el código de barras:');
             if (barcode) {
               setFormData(prev => ({ ...prev, barcode }));
-              stopCamera();
+              showToast('Código capturado', 'success');
             }
           };
 
-          // GUARDAR PRODUCTO EN NEON
           const saveProduct = async () => {
             if (!formData.name || !formData.price) {
-              alert('Nombre y precio son obligatorios');
+              showToast('Nombre y precio son obligatorios', 'error');
+              return;
+            }
+
+            if (parseFloat(formData.price) <= 0) {
+              showToast('El precio debe ser mayor a 0', 'error');
               return;
             }
 
@@ -109,44 +179,51 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  name: formData.name,
-                  barcode: formData.barcode || null,
-                  description: formData.description || null,
+                  name: formData.name.trim(),
+                  barcode: formData.barcode?.trim() || null,
+                  description: formData.description?.trim() || null,
                   price: parseFloat(formData.price) || 0,
                   cost: parseFloat(formData.cost) || 0,
                   stock: parseInt(formData.stock) || 0,
                   min_stock: parseInt(formData.min_stock) || 0,
-                  category_name: formData.category_name || null
+                  category_name: formData.category_name?.trim() || null
                 })
               });
 
               const data = await response.json();
+              
               if (data.success) {
                 await loadData();
                 setShowForm(false);
                 resetForm();
-                alert('✅ Producto guardado exitosamente');
+                showToast('✅ Producto guardado exitosamente', 'success');
+              } else {
+                throw new Error(data.error || 'Error al guardar');
               }
             } catch (error) {
-              alert('❌ Error al guardar: ' + error.message);
+              console.error('Error:', error);
+              showToast('❌ Error al guardar: ' + error.message, 'error');
             } finally {
               setLoading(false);
             }
           };
 
-          // ELIMINAR PRODUCTO
-          const deleteProduct = async (productId) => {
-            if (!confirm('¿Eliminar este producto?')) return;
+          const deleteProduct = async (productId, productName) => {
+            if (!confirm(`¿Eliminar "${productName}"?`)) return;
 
             try {
               const response = await fetch(`${API_URL}/products?id=${productId}`, {
                 method: 'DELETE'
               });
+              
               if (response.ok) {
                 await loadData();
+                showToast('Producto eliminado', 'success');
+              } else {
+                throw new Error('Error al eliminar');
               }
             } catch (error) {
-              alert('Error al eliminar: ' + error.message);
+              showToast('Error al eliminar: ' + error.message, 'error');
             }
           };
 
@@ -157,12 +234,16 @@
             });
           };
 
-          // EXPORTAR SQL
           const exportToSQL = async () => {
+            if (products.length === 0) {
+              showToast('No hay productos para exportar', 'error');
+              return;
+            }
             try {
+              showToast('Generando archivo SQL...', 'info');
               window.open(`${API_URL}/export-sql`, '_blank');
             } catch (error) {
-              alert('Error al exportar: ' + error.message);
+              showToast('Error al exportar: ' + error.message, 'error');
             }
           };
 
@@ -173,32 +254,41 @@
 
           return (
             <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+              {/* Toast Notifications */}
+              {toast && (
+                <Toast 
+                  message={toast.message} 
+                  type={toast.type} 
+                  onClose={() => setToast(null)} 
+                />
+              )}
+
               {/* Header */}
-              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
-                <div className="max-w-7xl mx-auto px-4 py-4 sm:py-6">
-                  <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                    <div className="flex items-center gap-3">
-                      <i data-lucide="package" className="w-8 h-8"></i>
-                      <div>
-                        <h1 className="text-2xl font-bold">Inventario - Colmado Gerardo</h1>
-                        <p className="text-sm opacity-90">{products.length} productos registrados</p>
+              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg sticky top-0 z-40">
+                <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                      <i data-lucide="package" className="w-7 h-7 sm:w-8 sm:h-8 flex-shrink-0"></i>
+                      <div className="flex-1 min-w-0">
+                        <h1 className="text-lg sm:text-2xl font-bold truncate">Inventario - Colmado Gerardo</h1>
+                        <p className="text-xs sm:text-sm opacity-90">{products.length} productos</p>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 w-full sm:w-auto">
                       <button
                         onClick={() => setShowForm(true)}
-                        className="bg-white text-indigo-600 px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-indigo-50 transition-all"
+                        className="flex-1 sm:flex-initial bg-white text-indigo-600 px-3 sm:px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-indigo-50 transition-all active:scale-95"
                       >
-                        <i data-lucide="plus" className="w-5 h-5"></i>
-                        <span className="hidden sm:inline">Nuevo</span>
+                        <i data-lucide="plus" className="w-4 h-4 sm:w-5 sm:h-5"></i>
+                        <span className="text-sm sm:text-base">Nuevo</span>
                       </button>
                       <button
                         onClick={exportToSQL}
-                        className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-green-600 transition-all disabled:opacity-50"
+                        className="flex-1 sm:flex-initial bg-green-500 text-white px-3 sm:px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-green-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                         disabled={products.length === 0}
                       >
-                        <i data-lucide="download" className="w-5 h-5"></i>
-                        <span className="hidden sm:inline">Exportar</span>
+                        <i data-lucide="download" className="w-4 h-4 sm:w-5 sm:h-5"></i>
+                        <span className="text-sm sm:text-base hidden xs:inline">Exportar</span>
                       </button>
                     </div>
                   </div>
@@ -206,28 +296,28 @@
               </div>
 
               {/* Search */}
-              <div className="max-w-7xl mx-auto px-4 py-4">
-                <div className="bg-white rounded-lg shadow-md p-4 flex flex-col sm:flex-row gap-4 items-center">
+              <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+                <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 flex flex-col sm:flex-row gap-3 items-center">
                   <div className="relative flex-1 w-full">
-                    <i data-lucide="search" className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5"></i>
+                    <i data-lucide="search" className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 sm:w-5 sm:h-5"></i>
                     <input
                       type="text"
-                      placeholder="Buscar por nombre o código..."
+                      placeholder="Buscar..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="w-full pl-9 sm:pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm sm:text-base"
                     />
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 w-full sm:w-auto justify-center">
                     <button
                       onClick={() => setViewMode('grid')}
-                      className={`p-2 rounded-lg ${viewMode === 'grid' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100'}`}
+                      className={`flex-1 sm:flex-initial p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100'}`}
                     >
                       <i data-lucide="grid-3x3" className="w-5 h-5"></i>
                     </button>
                     <button
                       onClick={() => setViewMode('list')}
-                      className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100'}`}
+                      className={`flex-1 sm:flex-initial p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100'}`}
                     >
                       <i data-lucide="list" className="w-5 h-5"></i>
                     </button>
@@ -235,31 +325,37 @@
                 </div>
               </div>
 
-              {/* Products Grid */}
-              <div className="max-w-7xl mx-auto px-4 pb-8">
+              {/* Products */}
+              <div className="max-w-7xl mx-auto px-3 sm:px-4 pb-6 sm:pb-8">
                 {filteredProducts.length === 0 ? (
-                  <div className="bg-white rounded-lg shadow-md p-12 text-center">
-                    <i data-lucide="package" className="w-16 h-16 mx-auto text-gray-400 mb-4"></i>
-                    <h3 className="text-xl font-semibold text-gray-700 mb-2">No hay productos</h3>
-                    <p className="text-gray-500 mb-4">Comienza agregando tu primer producto</p>
-                    <button
-                      onClick={() => setShowForm(true)}
-                      className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-indigo-700"
-                    >
-                      Agregar Producto
-                    </button>
+                  <div className="bg-white rounded-lg shadow-md p-8 sm:p-12 text-center">
+                    <i data-lucide="package" className="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-gray-400 mb-4"></i>
+                    <h3 className="text-lg sm:text-xl font-semibold text-gray-700 mb-2">No hay productos</h3>
+                    <p className="text-sm sm:text-base text-gray-500 mb-4">
+                      {searchTerm ? 'No se encontraron resultados' : 'Comienza agregando tu primer producto'}
+                    </p>
+                    {!searchTerm && (
+                      <button
+                        onClick={() => setShowForm(true)}
+                        className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-indigo-700 active:scale-95 transition-all"
+                      >
+                        Agregar Producto
+                      </button>
+                    )}
                   </div>
                 ) : viewMode === 'grid' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
                     {filteredProducts.map((product) => (
                       <div key={product.id} className="bg-white rounded-lg shadow-md hover:shadow-xl transition-shadow overflow-hidden">
-                        <div className="bg-gradient-to-br from-indigo-500 to-purple-600 h-32 flex items-center justify-center">
-                          <i data-lucide="package" className="w-16 h-16 text-white opacity-80"></i>
+                        <div className="bg-gradient-to-br from-indigo-500 to-purple-600 h-24 sm:h-32 flex items-center justify-center">
+                          <i data-lucide="package" className="w-12 h-12 sm:w-16 sm:h-16 text-white opacity-80"></i>
                         </div>
-                        <div className="p-4">
-                          <h3 className="font-bold text-lg mb-2 truncate">{product.name}</h3>
-                          {product.barcode && <p className="text-xs text-gray-500 mb-2">📊 {product.barcode}</p>}
-                          <div className="space-y-1 text-sm mb-3">
+                        <div className="p-3 sm:p-4">
+                          <h3 className="font-bold text-base sm:text-lg mb-2 truncate" title={product.name}>{product.name}</h3>
+                          {product.barcode && (
+                            <p className="text-xs text-gray-500 mb-2 truncate">📊 {product.barcode}</p>
+                          )}
+                          <div className="space-y-1 text-xs sm:text-sm mb-3">
                             <div className="flex justify-between">
                               <span className="text-gray-600">Precio:</span>
                               <span className="font-semibold text-green-600">${product.price}</span>
@@ -277,8 +373,8 @@
                             )}
                           </div>
                           <button
-                            onClick={() => deleteProduct(product.id)}
-                            className="w-full bg-red-50 text-red-600 py-2 rounded-lg hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
+                            onClick={() => deleteProduct(product.id, product.name)}
+                            className="w-full bg-red-50 text-red-600 py-2 rounded-lg hover:bg-red-100 transition-colors flex items-center justify-center gap-2 active:scale-95 text-sm sm:text-base"
                           >
                             <i data-lucide="trash-2" className="w-4 h-4"></i>
                             Eliminar
@@ -290,31 +386,31 @@
                 ) : (
                   <div className="bg-white rounded-lg shadow-md overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="w-full">
+                      <table className="w-full text-sm">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Código</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Precio</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Categoría</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
+                            <th className="px-3 py-2 sm:px-4 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
+                            <th className="px-3 py-2 sm:px-4 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Código</th>
+                            <th className="px-3 py-2 sm:px-4 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase">Precio</th>
+                            <th className="px-3 py-2 sm:px-4 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock</th>
+                            <th className="px-3 py-2 sm:px-4 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Categoría</th>
+                            <th className="px-3 py-2 sm:px-4 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                           {filteredProducts.map((product) => (
                             <tr key={product.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm">{product.name}</td>
-                              <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">{product.barcode || '-'}</td>
-                              <td className="px-4 py-3 text-sm font-semibold text-green-600">${product.price}</td>
-                              <td className="px-4 py-3 text-sm">
+                              <td className="px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm">{product.name}</td>
+                              <td className="px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-gray-500 hidden sm:table-cell">{product.barcode || '-'}</td>
+                              <td className="px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm font-semibold text-green-600">${product.price}</td>
+                              <td className="px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm">
                                 <span className={`font-semibold ${product.stock <= product.min_stock ? 'text-red-600' : 'text-blue-600'}`}>
                                   {product.stock}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-sm hidden md:table-cell">{product.category_name || '-'}</td>
-                              <td className="px-4 py-3">
-                                <button onClick={() => deleteProduct(product.id)} className="text-red-600 hover:text-red-800">
+                              <td className="px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm hidden md:table-cell">{product.category_name || '-'}</td>
+                              <td className="px-3 py-2 sm:px-4 sm:py-3">
+                                <button onClick={() => deleteProduct(product.id, product.name)} className="text-red-600 hover:text-red-800 active:scale-95">
                                   <i data-lucide="trash-2" className="w-4 h-4"></i>
                                 </button>
                               </td>
@@ -327,17 +423,17 @@
                 )}
               </div>
 
-              {/* MODAL FORMULARIO - Ver siguiente parte */}
+              {/* MODAL FORMULARIO */}
               {showForm && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-                  <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full my-8">
-                    <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 flex justify-between items-center rounded-t-lg">
-                      <h2 className="text-2xl font-bold">Nuevo Producto</h2>
-                      <button onClick={() => { setShowForm(false); resetForm(); }} className="hover:bg-white hover:bg-opacity-20 rounded-full p-2">
+                <div className="fixed inset-0 bg-black bg-opacity-50 modal-overlay flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+                  <div className="bg-white rounded-t-2xl sm:rounded-lg shadow-xl w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6 flex justify-between items-center sticky top-0 z-10">
+                      <h2 className="text-xl sm:text-2xl font-bold">Nuevo Producto</h2>
+                      <button onClick={() => { setShowForm(false); resetForm(); }} className="hover:bg-white hover:bg-opacity-20 rounded-full p-2 active:scale-95">
                         <i data-lucide="x" className="w-6 h-6"></i>
                       </button>
                     </div>
-                    <div className="p-6 space-y-4">
+                    <div className="p-4 sm:p-6 space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Código de Barras</label>
                         <div className="flex gap-2">
@@ -345,69 +441,76 @@
                             type="text"
                             value={formData.barcode}
                             onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                             placeholder="Código de barras"
                           />
-                          <button onClick={startCamera} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 whitespace-nowrap">
+                          <button
+                            onClick={startCamera}
+                            className="bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700 active:scale-95 flex items-center gap-2 whitespace-nowrap transition-all"
+                          >
                             <i data-lucide="camera" className="w-5 h-5"></i>
                             <span className="hidden sm:inline">Escanear</span>
                           </button>
                         </div>
                       </div>
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Nombre del Producto *</label>
                         <input
                           type="text"
                           value={formData.name}
                           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                           placeholder="Ej: Arroz La Famosa 1kg"
                           required
                         />
                       </div>
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Descripción</label>
                         <textarea
                           value={formData.description}
                           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                           rows="2"
                           placeholder="Descripción del producto"
                         />
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                      <div className="grid grid-cols-2 gap-3 sm:gap-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Precio de Venta *</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Precio Venta *</label>
                           <input
                             type="number"
                             step="0.01"
                             value={formData.price}
                             onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                             placeholder="0.00"
                             required
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Precio de Costo</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Precio Costo</label>
                           <input
                             type="number"
                             step="0.01"
                             value={formData.cost}
                             onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                             placeholder="0.00"
                           />
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                      <div className="grid grid-cols-2 gap-3 sm:gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Stock Inicial</label>
                           <input
                             type="number"
                             value={formData.stock}
                             onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                             placeholder="0"
                           />
                         </div>
@@ -417,33 +520,35 @@
                             type="number"
                             value={formData.min_stock}
                             onChange={(e) => setFormData({ ...formData, min_stock: e.target.value })}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                             placeholder="0"
                           />
                         </div>
                       </div>
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Categoría</label>
                         <input
                           type="text"
                           value={formData.category_name}
                           onChange={(e) => setFormData({ ...formData, category_name: e.target.value })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
                           placeholder="Ej: Granos, Bebidas, Lácteos"
                         />
                       </div>
-                      <div className="flex flex-col sm:flex-row gap-3 pt-4">
+
+                      <div className="flex flex-col sm:flex-row gap-3 pt-4 sticky bottom-0 bg-white pb-2">
                         <button
                           onClick={saveProduct}
                           disabled={loading}
-                          className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                          className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 sm:py-4 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 active:scale-95 transition-all"
                         >
                           <i data-lucide="save" className="w-5 h-5"></i>
                           {loading ? 'Guardando...' : 'Guardar Producto'}
                         </button>
                         <button
                           onClick={() => { setShowForm(false); resetForm(); }}
-                          className="sm:w-auto px-6 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300"
+                          className="sm:w-auto px-6 bg-gray-200 text-gray-700 py-3 sm:py-4 rounded-lg font-semibold hover:bg-gray-300 active:scale-95 transition-all"
                         >
                           Cancelar
                         </button>
@@ -455,20 +560,37 @@
 
               {/* MODAL SCANNER */}
               {showScanner && (
-                <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center p-4 z-50">
-                  <div className="bg-white rounded-lg max-w-md w-full">
-                    <div className="p-4">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-xl font-bold">Escanear Código</h3>
-                        <button onClick={stopCamera} className="text-gray-500 hover:text-gray-700">
-                          <i data-lucide="x" className="w-6 h-6"></i>
-                        </button>
+                <div className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center p-4 z-50">
+                  <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden">
+                    <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <i data-lucide="camera" className="w-6 h-6"></i>
+                        <h3 className="text-lg sm:text-xl font-bold">Escanear Código</h3>
                       </div>
-                      <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg mb-4" />
+                      <button onClick={stopCamera} className="hover:bg-white hover:bg-opacity-20 rounded-full p-2 active:scale-95">
+                        <i data-lucide="x" className="w-6 h-6"></i>
+                      </button>
+                    </div>
+                    <div className="p-4">
+                      <div className="relative rounded-lg overflow-hidden mb-4 bg-gray-900">
+                        <video
+                          ref={videoRef}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-64 object-cover"
+                        />
+                        <div className="absolute inset-0 border-4 border-dashed border-indigo-500 rounded-lg pointer-events-none"></div>
+                        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-3/4 h-1 bg-red-500 shadow-lg"></div>
+                      </div>
+                      <p className="text-center text-sm text-gray-600 mb-4">
+                        Posiciona el código de barras en el centro
+                      </p>
                       <button
                         onClick={captureBarcode}
-                        className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700"
+                        className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 active:scale-95 transition-all flex items-center justify-center gap-2"
                       >
+                        <i data-lucide="keyboard" className="w-5 h-5"></i>
                         Ingresar Manualmente
                       </button>
                     </div>
